@@ -18,10 +18,11 @@ pads every dimension to a tile multiple; the script reports how much of each
 tile is useful work, which is the main inefficiency for tiny layers on a
 128 x 512 systolic tile.
 
-Neuron's compiler wheels support Python 3.8-3.11. In Colab (Python 3.12):
-    pip install uv && uv venv /content/nki -p 3.10
+Install into an isolated venv (current neuronx-cc wheels are cp311-cp314):
+    pip install uv && uv venv /content/nki -p 3.12
     uv pip install -p /content/nki numpy neuronx-cc \
-        --extra-index-url https://pip.repos.neuron.amazonaws.com
+        --extra-index-url https://pip.repos.neuron.amazonaws.com \
+        --index-strategy unsafe-best-match
     /content/nki/bin/python accel/nki_dense.py
 """
 import json
@@ -30,8 +31,19 @@ import sys
 
 import numpy as np
 
-import neuronxcc.nki as nki
-import neuronxcc.nki.language as nl
+try:                                   # Neuron SDK layout: neuronxcc.nki
+    import neuronxcc.nki as nki
+    import neuronxcc.nki.language as nl
+except ImportError:                    # standalone nki package in newer releases
+    import nki
+    import nki.language as nl
+
+
+def simulate(kernel, *args):
+    """Run a kernel on CPU in the NKI simulator (API name differs by release)."""
+    if hasattr(nki, "simulate_kernel"):
+        return nki.simulate_kernel(kernel, *args)
+    return nki.simulate(kernel)(*args)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "compiler"))
@@ -92,7 +104,7 @@ def run_layer(x: np.ndarray, W: np.ndarray, b: np.ndarray, act: str):
     w[:K, :N] = W.T
     bias_rep = np.zeros((TM, Np), np.float32)
     bias_rep[:, :N] = b
-    y = nki.simulate_kernel(KERNELS[act], xT, w, bias_rep)
+    y = simulate(KERNELS[act], xT, w, bias_rep)
     util = (M * K * N) / (Mp * Kp * Np)
     return np.asarray(y)[:M, :N], util
 
@@ -102,7 +114,13 @@ def main():
     layers = rt.model_layers(spec)
     params = rt.init_params(layers, seed=0)
     rng = np.random.default_rng(1)
-    report = {"neuronx_cc": getattr(nki, "__version__", "unknown"), "layers": [], "network": {}}
+    try:
+        from importlib.metadata import version
+        nki_version = version("neuronx-cc")
+    except Exception:
+        nki_version = getattr(nki, "__version__", "unknown")
+    print(f"neuronx-cc {nki_version}")
+    report = {"neuronx_cc": nki_version, "layers": [], "network": {}}
 
     # 1) every activation on an awkward shape (exercises padding on all dims)
     for act in KERNELS:
