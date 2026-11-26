@@ -1,0 +1,74 @@
+{
+  "batch": 256,
+  "isa": "avx512",
+  "mflop_per_forward": 365.57312,
+  "passes": [
+    "frontend:  10 nodes  linear[226x500] -> act[celu] -> linear[500x1000] -> act[relu] -> linear[1000x100] -> act[relu] -> linear[100x10] -> act[relu] -> linear[10x1] -> act[sigmoid]",
+    "decompose: 15 nodes",
+    "fuse:      15 -> 5 nodes  dense[226x500] act=celu -> dense[500x1000] act=relu -> dense[1000x100] act=relu -> dense[100x10] act=relu -> dense[10x1] act=sigmoid",
+    "plan:      arena 1500 floats/row (slot0 500 + slot1 1000); one buffer per tensor would need 1610"
+  ],
+  "plan_fused": {
+    "slot0_width": 500,
+    "slot1_width": 1000,
+    "arena_floats_per_row": 1500,
+    "naive_floats_per_row": 1610
+  },
+  "plan_unfused": {
+    "slot0_width": 500,
+    "slot1_width": 1000,
+    "arena_floats_per_row": 1500,
+    "naive_floats_per_row": 4830
+  },
+  "results": [
+    {
+      "backend": "c_naive",
+      "median_us": 78546.66200000793,
+      "gflops": 4.654215859611744,
+      "speedup_vs_naive": 1.0,
+      "max_abs_err": 5.795887525472665e-08
+    },
+    {
+      "backend": "numpy_blas",
+      "median_us": 2806.6050000461473,
+      "gflops": 130.25456734880365,
+      "speedup_vs_naive": 27.986361457603202,
+      "max_abs_err": 7.387692535498758e-08
+    },
+    {
+      "backend": "tinyfuse_unfused",
+      "median_us": 10656.27000002678,
+      "gflops": 34.30591754892484,
+      "speedup_vs_naive": 7.370933919637034,
+      "max_abs_err": 8.142290786050665e-08
+    },
+    {
+      "backend": "tinyfuse_fused_untiled",
+      "median_us": 12216.78100000645,
+      "gflops": 29.9238498258917,
+      "speedup_vs_naive": 6.429407386443816,
+      "max_abs_err": 8.521125749449965e-08
+    },
+    {
+      "backend": "tinyfuse_fused",
+      "median_us": 10188.946999960535,
+      "gflops": 35.87938184401351,
+      "speedup_vs_naive": 7.709006828704886,
+      "max_abs_err": 8.521125749449965e-08
+    },
+    {
+      "backend": "c_simd_fused",
+      "median_us": 3143.4590000571916,
+      "gflops": 116.29644922785658,
+      "speedup_vs_naive": 24.987334652234644,
+      "max_abs_err": 6.514896710996254e-08
+    },
+    {
+      "backend": "c_simd_fused_omp",
+      "median_us": 1867.5529998972706,
+      "gflops": 195.74979666981832,
+      "speedup_vs_naive": 42.058598607016016,
+      "max_abs_err": 6.514896710996254e-08
+    }
+  ]
+}

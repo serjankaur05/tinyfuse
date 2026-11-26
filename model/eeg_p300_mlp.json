@@ -1,0 +1,17 @@
+{
+  "name": "eeg_p300_mlp",
+  "source": "nn.Sequential in serjankaur05/ML-for-EEG-Data (Machine_Learning_to_Analyze_EEG_Data.ipynb)",
+  "input_features": 226,
+  "layers": [
+    {"type": "linear", "out_features": 500},
+    {"type": "celu"},
+    {"type": "linear", "out_features": 1000},
+    {"type": "relu"},
+    {"type": "linear", "out_features": 100},
+    {"type": "relu"},
+    {"type": "linear", "out_features": 10},
+    {"type": "relu"},
+    {"type": "linear", "out_features": 1},
+    {"type": "sigmoid"}
+  ]
+}

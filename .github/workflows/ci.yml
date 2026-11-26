@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # x86-64-v3 = AVX2 + FMA kernels; x86-64 = portable scalar fallback
+        march: [x86-64-v3, x86-64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libomp-dev
+          pip install numpy
+      - name: Build and test (kernels, compiler, profiler)
+        run: make test MARCH=${{ matrix.march }}
+      - name: Quick benchmark and profile
+        run: |
+          make bench MARCH=${{ matrix.march }} BATCH=64 REPEATS=5
+          ./build/kprof -trace results/kernel_trace.json -compare naive,simd_fused_omp

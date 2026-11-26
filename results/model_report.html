@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kprof report</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1d1d1b;--muted:#6b6b66;--line:#e3e2dc;--bar:#2f6f8f;--bar2:#c2703d}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--muted:#9d9c95;--line:#33322e;--bar:#6fb3d2;--bar2:#e39a66}}
+body{background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,system-ui,sans-serif;margin:0;padding:24px 16px;max-width:1100px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px}
+.muted{color:var(--muted)}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+.scroll{overflow-x:auto}svg text{fill:var(--fg);font-size:12px}
+</style></head><body>
+<h1>kprof report</h1>
+<div class="muted">results/model_trace.json &middot; batch=256 &middot; isa=avx512</div>
+
+<h2>One forward pass, sum of median kernel times</h2>
+<svg width="820" height="58" style="max-width:100%" role="img" aria-label="Time per variant">
+
+<text x="0" y="0" dy="14">tinyfuse_unfused</text>
+<rect x="190" y="0" width="560" height="18" fill="var(--bar)"></rect>
+<text x="756" y="0" dy="14">11074 us</text>
+
+<text x="0" y="26" dy="14">tinyfuse_fused</text>
+<rect x="190" y="26" width="542" height="18" fill="var(--bar)"></rect>
+<text x="738" y="26" dy="14">10719 us</text>
+
+</svg>
+
+
+
+<h2>Kernels</h2>
+<div class="scroll"><table>
+<tr><th>variant</th><th>kernel</th><th>n</th><th>median us</th><th>p95 us</th><th>GFLOP/s</th><th>GB/s</th><th>FLOP/B</th><th>% peak</th><th>bound</th></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node0_matmul matmul[226x500]</td><td>100</td><td>1455.7</td><td>1490.8</td><td>39.74</td><td>0.82</td><td>48.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node1_bias_add bias_add</td><td>100</td><td>20.1</td><td>27.5</td><td>6.38</td><td>59.59</td><td>0.1</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node2_act act[celu]</td><td>100</td><td>56.5</td><td>79.4</td><td>2.27</td><td>9.06</td><td>0.2</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node3_matmul matmul[500x1000]</td><td>100</td><td>8440.0</td><td>8828.1</td><td>30.33</td><td>0.42</td><td>72.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node4_bias_add bias_add</td><td>100</td><td>49.8</td><td>80.6</td><td>5.14</td><td>71.06</td><td>0.1</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node5_act act[relu]</td><td>100</td><td>22.4</td><td>26.5</td><td>11.41</td><td>45.63</td><td>0.2</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node6_matmul matmul[1000x100]</td><td>100</td><td>974.4</td><td>1022.8</td><td>52.54</td><td>1.57</td><td>33.5</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node7_bias_add bias_add</td><td>100</td><td>13.1</td><td>16.2</td><td>1.96</td><td>116.80</td><td>0.0</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node8_act act[relu]</td><td>100</td><td>5.3</td><td>6.1</td><td>4.84</td><td>19.34</td><td>0.2</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node9_matmul matmul[100x10]</td><td>100</td><td>17.1</td><td>19.7</td><td>29.93</td><td>6.82</td><td>4.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node10_bias_add bias_add</td><td>100</td><td>4.8</td><td>6.7</td><td>0.54</td><td>24.48</td><td>0.0</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node11_act act[relu]</td><td>100</td><td>2.5</td><td>4.9</td><td>1.02</td><td>4.09</td><td>0.2</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node12_matmul matmul[10x1]</td><td>100</td><td>6.1</td><td>7.9</td><td>0.84</td><td>1.84</td><td>0.5</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node13_bias_add bias_add</td><td>100</td><td>3.7</td><td>5.0</td><td>0.07</td><td>3.09</td><td>0.0</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_unfused</td><td>tf_node14_act act[sigmoid]</td><td>100</td><td>2.5</td><td>3.2</td><td>0.10</td><td>0.41</td><td>0.2</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_fused</td><td>tf_node0_dense dense[226x500] act=celu</td><td>100</td><td>1707.9</td><td>2120.7</td><td>33.88</td><td>0.70</td><td>48.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_fused</td><td>tf_node1_dense dense[500x1000] act=relu</td><td>100</td><td>8207.0</td><td>9495.2</td><td>31.19</td><td>0.43</td><td>72.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_fused</td><td>tf_node2_dense dense[1000x100] act=relu</td><td>100</td><td>755.6</td><td>1059.6</td><td>67.76</td><td>2.02</td><td>33.5</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_fused</td><td>tf_node3_dense dense[100x10] act=relu</td><td>100</td><td>40.2</td><td>55.3</td><td>12.73</td><td>2.90</td><td>4.4</td><td>-</td><td>-</td></tr>
+<tr><td>tinyfuse_fused</td><td>tf_node4_dense dense[10x1] act=sigmoid</td><td>100</td><td>8.4</td><td>13.9</td><td>0.61</td><td>1.34</td><td>0.5</td><td>-</td><td>-</td></tr>
+</table></div>
+</body></html>
