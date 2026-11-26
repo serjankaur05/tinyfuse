@@ -176,6 +176,24 @@ class GraphReplay:
 # ---------------------------------------------------------------------------
 # Measurement
 # ---------------------------------------------------------------------------
+def inspect_codegen(x, w, b):
+    """Compile one fixed config of the kernel and look at its PTX: does tl.dot
+    become tensor-core MMA instructions (mma.sync / wgmma) or plain FMAs?"""
+    y = torch.empty((x.shape[0], w.shape[0]), device=x.device, dtype=x.dtype)
+    M, K = x.shape
+    N = w.shape[0]
+    compiled = fused_dense_kernel.fn[(triton.cdiv(M, 64), triton.cdiv(N, 64))](
+        x, w, b, y, M, N, K, x.stride(0), x.stride(1), w.stride(0), w.stride(1),
+        y.stride(0), y.stride(1), 1, BLOCK_M=64, BLOCK_N=64, BLOCK_K=32,
+        num_warps=4, num_stages=2)
+    ptx = compiled.asm.get("ptx", "") if hasattr(compiled, "asm") else ""
+    return {"compute_capability": ".".join(map(str, torch.cuda.get_device_capability())),
+            "ptx_mma_instructions": ptx.count("mma.sync") + ptx.count("wgmma"),
+            "ptx_fma_instructions": ptx.count("fma.rn"),
+            "best_config_per_shape": {str(k): str(v) for k, v in
+                                      getattr(fused_dense_kernel, "cache", {}).items()}}
+
+
 def bench_ms(fn):
     """Median ms using triton.testing.do_bench (flushes L2 between runs)."""
     return triton.testing.do_bench(fn, warmup=25, rep=200, return_mode="median")
@@ -277,6 +295,12 @@ def main():
                   f"{r['triton_us']:>11.1f}{r['speedup']:>8.2f}x")
         results["batches"][str(B)] = {"mflop": flops / 1e6, "backends": rows, "per_layer": per_layer}
 
+    x = torch.rand(256, layers[1]["K"], device=dev, dtype=dt)
+    results["codegen"] = inspect_codegen(x, tmodel.ws[1], tmodel.bs[1])
+    cg = results["codegen"]
+    print(f"\ncodegen check (compute capability {cg['compute_capability']}): "
+          f"{cg['ptx_mma_instructions']} tensor-core MMA and {cg['ptx_fma_instructions']} "
+          f"FMA instructions in the PTX of the fused kernel")
     with open(os.path.join(RESULTS, "gpu_results.json"), "w") as fh:
         json.dump(results, fh, indent=2)
     with open(os.path.join(RESULTS, "gpu_trace.json"), "w") as fh:
