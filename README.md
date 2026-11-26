@@ -103,7 +103,48 @@ kernel) to accelerators. Run it all with
 | `accel/nki_dense.py` | **NKI** kernel for Trainium: K on the 128-lane partition dim, `nl.matmul` on the Tensor Engine accumulating in **PSUM** across K tiles, bias + activation applied from PSUM before one store to HBM. Verified in `nki.simulate_kernel` for every activation and for the whole EEG network, and reports **tile utilization** (how much of each 128 x 512 tile is real work after padding). |
 | `accel/xla_jax.py` | JAX version of the network: lowers it to **StableHLO (MLIR)**, compiles it with **XLA**, saves both IRs, and reports which ops XLA fused into each kernel, to compare with tinyfuse's fusion. Also times op-by-op vs `jax.jit`. |
 
-Results from a Colab T4 run are recorded below once measured.
+### Measured results (Colab: Tesla T4, torch 2.14.1, Triton 3.8.0, JAX 0.11.1, neuronx-cc 2.24)
+
+**NKI (Neuron simulator).** The fused kernel matches NumPy for every activation
+and for all five EEG layers (whole network max abs error 5.9e-8). The simulator
+run exposed padding waste: with fixed 512-wide output tiles only 54.5% of the
+Tensor Engine work was useful (the 1000 -> 100 layer: 19%, 100 -> 10: 1.5%).
+Choosing the tile width per layer (fewest tiles of at most 512 columns, equally
+sized: 1000 runs as 2 x 500, 100 as 1 x 100) raised it to **96.0%, 1.76x less
+padded matmul work**.
+
+| Layer | Fixed 512 tiles | Shape-adaptive tiles |
+|---|---:|---:|
+| 226 -> 500 | 86.2% | 88.3% |
+| 500 -> 1000 | 95.4% | 97.7% |
+| 1000 -> 100 | 19.1% | 97.7% |
+| 100 -> 10 | 1.5% | 78.1% |
+| 10 -> 1 | 0.0% | 7.8% |
+
+**Triton (T4).** Correct (max error 2.7e-4 at fp16), and it cuts kernels per
+forward pass from 12 (PyTorch eager) to 5, but it runs 5-18x slower than cuBLAS
+per layer (0.7 vs 4.8-11.7 TFLOP/s). Inspecting the generated PTX shows why:
+**0 tensor-core MMA instructions and 1,024 FMA instructions** on compute
+capability 7.5. Triton targets tensor cores on 8.0+ GPUs, so on a T4 `tl.dot`
+compiles to plain FMAs while cuBLAS uses tensor cores. The kernel only wins on
+the 10 -> 1 layer (1.3x). Rerunning on an 8.0+ GPU (L4, A100) is the next test.
+
+| Batch | torch eager | torch.compile | reduce-overhead | Triton fused |
+|---|---:|---:|---:|---:|
+| 256 | 75.8 us | 72.8 us | 91.6 us | 504.8 us |
+| 4096 | 502.1 us | 505.1 us | 526.6 us | 8,625.9 us |
+
+**XLA / StableHLO.** The jitted network lowers to 57 StableHLO (MLIR) ops, and
+XLA compiles them into **6 GPU kernel launches**: the CELU epilogue
+(max/min/expm1/add) becomes one loop fusion, and the 10 -> 1 layer is
+rewritten as a reduction fused with the sigmoid. `jax.jit` runs **27x faster**
+than op-by-op (397 us vs 10.7 ms), max error 7e-8.
+
+**PyTorch training (EEG repo).** `torch.profiler` on a T4 showed the Adam
+optimizer step at 46% of GPU time, more than the matmuls. `Adam(fused=True)`
+cut 500 training iterations from 1.356 s to 0.870 s (**1.56x, -36%**) with the
+same final loss; adding `torch.compile` on top made it slower (1.17 s).
+
 
 ## Run it
 
