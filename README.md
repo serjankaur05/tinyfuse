@@ -122,7 +122,7 @@ padded matmul work**.
 | 10 -> 1 | 0.0% | 7.8% |
 
 **Triton (T4).** Correct (max error 2.7e-4 at fp16), and it cuts kernels per
-forward pass from 12 (PyTorch eager) to 5, but it runs 5-18x slower than cuBLAS
+forward pass from 12 (PyTorch eager) to 5, but it runs 5-19x slower than cuBLAS
 per layer (0.7 vs 4.8-11.7 TFLOP/s). Inspecting the generated PTX shows why:
 **0 tensor-core MMA instructions and 1,024 FMA instructions** on compute
 capability 7.5. Triton targets tensor cores on 8.0+ GPUs, so on a T4 `tl.dot`
