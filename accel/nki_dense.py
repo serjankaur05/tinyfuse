@@ -18,12 +18,14 @@ pads every dimension to a tile multiple; the script reports how much of each
 tile is useful work, which is the main inefficiency for tiny layers on a
 128 x 512 systolic tile.
 
-Install into an isolated venv (current neuronx-cc wheels are cp311-cp314):
-    pip install uv && uv venv /content/nki -p 3.12
-    uv pip install -p /content/nki numpy neuronx-cc \
+Written against the neuronxcc.nki API (Neuron SDK up to 2.24). Neuron 2.25+
+moved NKI to a standalone `nki` package with a different tensor API. Install
+into an isolated venv:
+    pip install uv && uv venv /content/nki24 -p 3.11
+    uv pip install -p /content/nki24 numpy "neuronx-cc==2.24.*" \
         --extra-index-url https://pip.repos.neuron.amazonaws.com \
         --index-strategy unsafe-best-match
-    /content/nki/bin/python accel/nki_dense.py
+    /content/nki24/bin/python accel/nki_dense.py
 """
 import json
 import os
