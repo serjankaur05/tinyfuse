@@ -90,6 +90,21 @@ plan:      arena 1500 floats/row (slot0 500 + slot1 1000)
   kernel. The gap is register blocking: LLVM keeps the accumulators in memory.
   Emitting register tiles in the IR is the obvious next step.
 
+## Accelerators: GPU (Triton), Trainium (NKI), XLA (StableHLO / MLIR)
+
+`accel/` takes the same fused dense layer (matmul + bias + activation in one
+kernel) to accelerators. Run it all with
+[`accel/run_colab.ipynb`](accel/run_colab.ipynb) on a free Colab T4:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/serjankaur05/tinyfuse/blob/main/accel/run_colab.ipynb)
+
+| File | What it does |
+|---|---|
+| `accel/triton_dense.py` | **Triton** kernel: BLOCK_M x BLOCK_N output tiles accumulated in fp32 with `tl.dot` (tensor cores for fp16), bias + activation in the epilogue, **autotuned** tile sizes. Registered as a **PyTorch custom op** (`torch.library.triton_op`). Benchmarked against PyTorch eager (cuBLAS + separate activation kernels), `torch.compile`, and `torch.compile(mode="reduce-overhead")` (CUDA graphs), plus the Triton network replayed from one CUDA graph. Counts kernels per forward with `torch.profiler` and writes a kprof trace. |
+| `accel/nki_dense.py` | **NKI** kernel for Trainium: K on the 128-lane partition dim, `nl.matmul` on the Tensor Engine accumulating in **PSUM** across K tiles, bias + activation applied from PSUM before one store to HBM. Verified in `nki.simulate_kernel` for every activation and for the whole EEG network, and reports **tile utilization** (how much of each 128 x 512 tile is real work after padding). |
+| `accel/xla_jax.py` | JAX version of the network: lowers it to **StableHLO (MLIR)**, compiles it with **XLA**, saves both IRs, and reports which ops XLA fused into each kernel, to compare with tinyfuse's fusion. Also times op-by-op vs `jax.jit`. |
+
+Results from a Colab T4 run are recorded below once measured.
+
 ## Run it
 
 Needs gcc or clang with OpenMP, clang/LLVM, Go ≥ 1.22, Python 3 + NumPy.
@@ -122,7 +137,5 @@ model/                 the EEG network spec
 
 ## Limits
 
-This is CPU work: SIMD lanes and cache blocking, not GPU or accelerator
-kernels. The ideas carry over directly (tiling to a memory hierarchy, fusing
-epilogues, measuring against a roofline), but there is no CUDA, Triton or
-NKI code here. Only inference (forward pass) is implemented.
+Only inference (forward pass) is implemented. The NKI kernel is verified in
+the Neuron simulator, not timed on Trainium hardware.
