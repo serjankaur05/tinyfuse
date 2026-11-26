@@ -53,11 +53,12 @@ import runtime as rt  # noqa: E402  (NumPy-only helpers: spec, init, reference)
 
 TK = 128   # partition dim: contraction tile (nl.tile_size.pmax)
 TM = 128   # stationary free dim: rows of the output tile (gemm_stationary_fmax)
-TN = 512   # moving free dim: columns of the output tile (gemm_moving_fmax)
+TN_MAX = 512  # moving free dim limit: columns of one output tile (gemm_moving_fmax)
 
 
-def make_kernel(act: str):
-    """One specialized kernel per activation, so the epilogue is fixed at trace time."""
+def make_kernel(act: str, TN: int):
+    """One specialized kernel per (activation, tile width), so the epilogue and
+    the tile shape are fixed at trace time."""
 
     @nki.jit
     def fused_dense(xT, w, bias_rep):
@@ -87,26 +88,50 @@ def make_kernel(act: str):
     return fused_dense
 
 
-KERNELS = {a: make_kernel(a) for a in ("none", "relu", "celu", "sigmoid")}
+ACTS = ("none", "relu", "celu", "sigmoid")
+_KERNELS = {}
+
+
+def kernel_for(act: str, tn: int):
+    if (act, tn) not in _KERNELS:
+        _KERNELS[(act, tn)] = make_kernel(act, tn)
+    return _KERNELS[(act, tn)]
+
+
+def tile_width(N: int, adaptive: bool) -> int:
+    """Output tile width for a layer with N outputs.
+
+    fixed:    always TN_MAX (512), so N = 100 pads to 512 columns
+    adaptive: split N into the fewest tiles of at most 512 columns, equally
+              sized, so N = 1000 runs as 2 x 500 and N = 100 as 1 x 100"""
+    if not adaptive:
+        return TN_MAX
+    tiles = -(-N // TN_MAX)
+    return -(-N // tiles)
 
 
 def pad_to(n: int, t: int) -> int:
     return (n + t - 1) // t * t
 
 
-def run_layer(x: np.ndarray, W: np.ndarray, b: np.ndarray, act: str):
+def padded_shape(M: int, K: int, N: int, adaptive: bool):
+    tn = tile_width(N, adaptive)
+    return pad_to(M, TM), pad_to(K, TK), pad_to(N, tn), tn
+
+
+def run_layer(x: np.ndarray, W: np.ndarray, b: np.ndarray, act: str, adaptive: bool = True):
     """Pad to tile multiples, run the kernel in the simulator, unpad.
     Returns (y, tile_utilization)."""
     M, K = x.shape
     N = W.shape[0]
-    Mp, Kp, Np = pad_to(M, TM), pad_to(K, TK), pad_to(N, TN)
+    Mp, Kp, Np, tn = padded_shape(M, K, N, adaptive)
     xT = np.zeros((Kp, Mp), np.float32)
     xT[:K, :M] = x.T
     w = np.zeros((Kp, Np), np.float32)
     w[:K, :N] = W.T
     bias_rep = np.zeros((TM, Np), np.float32)
     bias_rep[:, :N] = b
-    y = simulate(KERNELS[act], xT, w, bias_rep)
+    y = simulate(kernel_for(act, tn), xT, w, bias_rep)
     util = (M * K * N) / (Mp * Kp * Np)
     return np.asarray(y)[:M, :N], util
 
@@ -125,40 +150,56 @@ def main():
     report = {"neuronx_cc": nki_version, "layers": [], "network": {}}
 
     # 1) every activation on an awkward shape (exercises padding on all dims)
-    for act in KERNELS:
+    for act in ACTS:
         x = rng.uniform(-1, 1, (37, 70)).astype(np.float32)
         W = rng.uniform(-0.1, 0.1, (45, 70)).astype(np.float32)
         b = rng.uniform(-0.1, 0.1, 45).astype(np.float32)
-        y, _ = run_layer(x, W, b, act)
         ref = rt.act_np(x.astype(np.float64) @ W.T + b, act)
-        err = float(np.abs(y - ref).max())
-        print(f"unit act={act:<8} shape 37x70 -> 45   max_err={err:.2e}")
-        assert err < 1e-4, f"activation {act}: error {err}"
+        for adaptive in (False, True):
+            y, _ = run_layer(x, W, b, act, adaptive)
+            err = float(np.abs(y - ref).max())
+            print(f"unit act={act:<8} tiles={'adaptive' if adaptive else 'fixed':<9}"
+                  f"shape 37x70 -> 45   max_err={err:.2e}")
+            assert err < 1e-4, f"activation {act}: error {err}"
 
     # 2) the EEG network, layer by layer, batch 256
     B = 256
     x = rng.uniform(0, 1, (B, spec["input_features"])).astype(np.float32)
     h = x
     print(f"\nEEG P300 network in the NKI simulator, batch {B}")
-    print(f"{'layer':<7}{'shape':<12}{'act':<9}{'tile_util':>10}{'max_err':>10}")
+    print(f"{'layer':<7}{'shape':<12}{'act':<9}{'tile_w':>7}{'util_fixed':>11}{'util_adapt':>11}{'max_err':>10}")
     for i, (L, (W, b)) in enumerate(zip(layers, params)):
-        y, util = run_layer(h, W, b, L["act"])
+        y, util = run_layer(h, W, b, L["act"], adaptive=True)
+        Mp, Kp, Np, _ = padded_shape(B, L["K"], L["N"], False)
+        util_fixed = (B * L["K"] * L["N"]) / (Mp * Kp * Np)
         ref = rt.act_np(h.astype(np.float64) @ W.T.astype(np.float64) + b, L["act"])
         err = float(np.abs(y - ref).max())
+        tn = tile_width(L["N"], True)
         report["layers"].append({"layer": i + 1, "K": L["K"], "N": L["N"], "act": L["act"],
-                                 "tile_utilization": util, "max_abs_err": err})
-        print(f"L{i + 1:<6}{str(L['K']) + 'x' + str(L['N']):<12}{L['act']:<9}{util:>9.1%}{err:>10.1e}")
+                                 "tile_width": tn, "tile_utilization_fixed": util_fixed,
+                                 "tile_utilization_adaptive": util, "max_abs_err": err})
+        print(f"L{i + 1:<6}{str(L['K']) + 'x' + str(L['N']):<12}{L['act']:<9}{tn:>7}"
+              f"{util_fixed:>10.1%}{util:>11.1%}{err:>10.1e}")
         assert err < 1e-4, f"layer {i + 1}: error {err}"
         h = y.astype(np.float32)
 
     ref = rt.reference_forward(x, layers, params)
     err = float(np.abs(h - ref).max())
     useful = sum(2 * B * L["K"] * L["N"] for L in layers)
-    padded = sum(2 * pad_to(B, TM) * pad_to(L["K"], TK) * pad_to(L["N"], TN) for L in layers)
+    def padded_work(adaptive):
+        total = 0
+        for L in layers:
+            Mp, Kp, Np, _ = padded_shape(B, L["K"], L["N"], adaptive)
+            total += 2 * Mp * Kp * Np
+        return total
+    fixed, adapt = padded_work(False), padded_work(True)
     report["network"] = {"batch": B, "max_abs_err": err, "useful_mflop": useful / 1e6,
-                         "padded_mflop": padded / 1e6, "utilization": useful / padded}
+                         "padded_mflop_fixed": fixed / 1e6, "padded_mflop_adaptive": adapt / 1e6,
+                         "utilization_fixed": useful / fixed, "utilization_adaptive": useful / adapt}
     print(f"\nwhole network vs float64 reference: max_err={err:.2e}")
-    print(f"tile utilization: {useful / padded:.1%} of padded Tensor Engine work is useful")
+    print(f"Tensor Engine tile utilization: {useful / fixed:.1%} with fixed 512-wide tiles -> "
+          f"{useful / adapt:.1%} with shape-adaptive tiles "
+          f"({fixed / adapt:.2f}x less padded matmul work)")
     assert err < 1e-4
 
     os.makedirs(os.path.join(ROOT, "results"), exist_ok=True)
